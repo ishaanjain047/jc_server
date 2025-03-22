@@ -6,10 +6,19 @@ from werkzeug.utils import secure_filename
 import uuid
 from datetime import datetime
 from pdf_processor import PDFToStructuredData
+import secrets
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
-app.secret_key = os.environ.get('SECRET_KEY', 'development-key-change-in-production')
+# In app.py, modify the CORS setup:
+CORS(app, supports_credentials=True, origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_headers=["Content-Type"], expose_headers=["Access-Control-Allow-Origin"])
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(16))
+
+
+# Configure session
+app.config['SESSION_TYPE'] = 'filesystem'  # This will store sessions on disk
+app.config['SESSION_PERMANENT'] = True  # Make sessions last longer
+app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # Session lifetime in seconds
+
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['PROCESSED_FOLDER'] = 'processed_data'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload size
@@ -18,7 +27,7 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload size
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['PROCESSED_FOLDER'], exist_ok=True)
 
-@app.route('/api/upload', methods=['POST'])  # Added /api prefix
+@app.route('/api/upload', methods=['POST'])
 def upload_file():
     """Handle PDF upload and processing"""
     if 'pdf_file' not in request.files:
@@ -53,13 +62,22 @@ def upload_file():
             if not json_path or not os.path.exists(json_path):
                 return jsonify({'error': 'Failed to process PDF'}), 500
                 
-            # Store the result path in session
+            # Read the JSON data
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            # Store the result path in session (still try this for other features)
             session['current_data_path'] = json_path
+            session.modified = True
             
-            # Return success with file ID for frontend to use
+            # Get item count
+            items_count = len(data.get("structured_data", {}).get("items", []))
+            
+            # Return success with the structured data
             return jsonify({
                 'success': True,
-                'message': f'File processed successfully. Found {len(result.get("structured_data", {}).get("structured_data", {}).get("items", []))} items.',
+                'message': f'File processed successfully. Found {items_count} items.',
+                'data': data,
                 'data_path': json_path
             })
             
@@ -71,8 +89,9 @@ def upload_file():
 @app.route('/api/get-data', methods=['GET'])  # Added /api prefix
 def get_data():
     """Return processed data for display"""
+    print("Hello from get_data")
     data_path = session.get('current_data_path')
-    
+    print("data_path: ", data_path)
     if not data_path or not os.path.exists(data_path):
         return jsonify({'error': 'No processed data available'}), 404
         
